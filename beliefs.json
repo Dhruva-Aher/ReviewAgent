@@ -1,0 +1,22 @@
+{
+  "rules": [
+    "All public functions must have explicit return type annotations",
+    "Never use bare except clauses \u2014 always catch specific exceptions",
+    "Database queries must never be constructed with string formatting (SQL injection risk)",
+    "All API endpoints must validate and sanitize input before processing",
+    "Secrets and credentials must never be hardcoded \u2014 use environment variables"
+  ],
+  "past_decisions": [
+    "We use httpx over requests for all HTTP calls \u2014 decided for async compatibility",
+    "SQLite for local persistence, PostgreSQL in production \u2014 do not introduce new ORMs",
+    "Pydantic v2 for all data validation \u2014 do not use dataclasses for API models",
+    "All errors must be raised as HTTPException with a clear detail message \u2014 no silent failures",
+    "PR #1 in owner/repo: flagged 3 high-severity issue(s) \u2014 Hardcoded secret 'hardcoded_secret_123' in run_command function",
+    "PR #1 in owner/repo: flagged 7 high-severity issue(s) \u2014 The authenticate function is vulnerable to SQL injection due to string formattin",
+    "PR #1 in owner/repo: flagged 3 high-severity issue(s) \u2014 The run_command function uses a hardcoded secret 'hardcoded_secret_123', which i",
+    "PR #1 in Dhruva-Aher/Trial: flagged 4 high-severity issue(s) \u2014 The authenticate function is vulnerable to SQL injection due to string formattin",
+    "PR #1 in Dhruva-Aher/Trial: flagged 3 high-severity issue(s) \u2014 The authenticate function is vulnerable to SQL injection due to string formattin",
+    "PR #2 in Dhruva-Aher/Trial: flagged 3 high-severity issue(s) \u2014 The run_query function is vulnerable to SQL injection due to string formatting i",
+    "PR #3 in Dhruva-Aher/Trial: flagged 4 high-severity issue(s) \u2014 The process_payment function uses the requests library, which is not allowed acc"
+  ]
+}
