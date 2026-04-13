@@ -17,6 +17,9 @@
     "PR #1 in Dhruva-Aher/Trial: flagged 4 high-severity issue(s) \u2014 The authenticate function is vulnerable to SQL injection due to string formattin",
     "PR #1 in Dhruva-Aher/Trial: flagged 3 high-severity issue(s) \u2014 The authenticate function is vulnerable to SQL injection due to string formattin",
     "PR #2 in Dhruva-Aher/Trial: flagged 3 high-severity issue(s) \u2014 The run_query function is vulnerable to SQL injection due to string formatting i",
-    "PR #3 in Dhruva-Aher/Trial: flagged 4 high-severity issue(s) \u2014 The process_payment function uses the requests library, which is not allowed acc"
+    "PR #3 in Dhruva-Aher/Trial: flagged 4 high-severity issue(s) \u2014 The process_payment function uses the requests library, which is not allowed acc",
+    "PR #4 in Dhruva-Aher/Trial: flagged 2 high-severity issue(s) \u2014 The DATABASE_URL in config.py is constructed with string formatting, which poses",
+    "PR #8 in Dhruva-Aher/Trial: flagged 3 high-severity issue(s) \u2014 The log_event function is vulnerable to SQL injection due to string formatting i",
+    "PR #9 in Dhruva-Aher/Trial: flagged 5 high-severity issue(s) \u2014 The verify_token function uses string formatting to construct the query, which p"
   ]
 }

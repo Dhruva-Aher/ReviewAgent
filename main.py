@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
 import beliefs as belief_store
@@ -40,6 +41,13 @@ app = FastAPI(
     description="Autonomous PR review agent with persistent belief system",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -90,6 +98,7 @@ def _run_pipeline(
     pr_number: int,
     diff: Optional[str],
     post_comment_flag: bool,
+    installation_id: int = None,
 ) -> dict:
     global _beliefs
 
@@ -98,9 +107,9 @@ def _run_pipeline(
 
     if not diff:
         logger.info(f"[FETCH] Fetching diff — {repo} PR #{pr_number}")
-        diff = github.fetch_pr_diff(owner, repo_name, pr_number)
+        diff = github.fetch_pr_diff(owner, repo_name, pr_number, installation_id)
         try:
-            meta = github.fetch_pr_meta(owner, repo_name, pr_number)
+            meta = github.fetch_pr_meta(owner, repo_name, pr_number, installation_id)
         except HTTPException:
             meta = {}
 
@@ -127,11 +136,11 @@ def _run_pipeline(
 
     if post_comment_flag:
         logger.info(f"[GITHUB] Posting comment — {repo} PR #{pr_number}")
-        comment_url = github.post_comment(owner, repo_name, pr_number, comment_body)
+        comment_url = github.post_comment(owner, repo_name, pr_number, comment_body, installation_id)
         if comment_url:
             logger.info(f"[GITHUB] Comment posted — {comment_url}")
         else:
-            logger.warning(f"[GITHUB] Comment failed — review printed to console instead")
+            logger.warning(f"[GITHUB] Comment failed — review printed to console")
 
     high_issues = [i for i in review_result.get("issues", []) if i.get("severity") == "high"]
     if high_issues:
@@ -156,7 +165,11 @@ def _run_pipeline(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "beliefs": len(_beliefs.get("rules", []))}
+    return {
+        "status": "ok",
+        "beliefs": len(_beliefs.get("rules", [])),
+        "mode": "github_app" if os.getenv("GITHUB_APP_ID") else "personal_token"
+    }
 
 
 @app.get("/beliefs")
@@ -192,7 +205,6 @@ def review(req: ReviewRequest):
 async def webhook(request: Request):
     event = request.headers.get("X-GitHub-Event", "")
     signature = request.headers.get("X-Hub-Signature-256", "")
-
     body = await request.body()
 
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
@@ -203,6 +215,13 @@ async def webhook(request: Request):
         if not hmac.compare_digest(expected, signature):
             logger.warning("[WEBHOOK] Invalid signature — rejected")
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    if event == "installation":
+        payload = await request.json()
+        action = payload.get("action", "")
+        account = payload.get("installation", {}).get("account", {}).get("login", "unknown")
+        logger.info(f"[APP] Installation {action} by {account}")
+        return {"status": "ok", "action": action}
 
     if event != "pull_request":
         logger.info(f"[WEBHOOK] Ignored event: {event}")
@@ -225,6 +244,7 @@ async def webhook(request: Request):
         repo_name = repo_data["name"]
         pr_number = pr["number"]
         repo = f"{owner}/{repo_name}"
+        installation_id = payload.get("installation", {}).get("id")
     except (KeyError, TypeError) as e:
         raise HTTPException(status_code=400, detail=f"Malformed webhook payload: {e}")
 
@@ -236,6 +256,7 @@ async def webhook(request: Request):
             pr_number=pr_number,
             diff=None,
             post_comment_flag=True,
+            installation_id=installation_id,
         )
         logger.info(f"[WEBHOOK] Processed — {repo} PR #{pr_number}")
         return {

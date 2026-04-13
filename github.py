@@ -16,12 +16,28 @@ def _get_token() -> str:
     return token
 
 
-def _headers(accept: str = "application/vnd.github+json") -> dict:
+def _personal_headers(accept: str = "application/vnd.github+json") -> dict:
     return {
         "Authorization": f"Bearer {_get_token()}",
         "Accept": accept,
         "X-GitHub-Api-Version": "2022-11-28",
     }
+
+
+def _app_headers(installation_id: int, accept: str = "application/vnd.github+json") -> dict:
+    from github_app import get_installation_token
+    token = get_installation_token(installation_id)
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": accept,
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _headers(installation_id: int = None, accept: str = "application/vnd.github+json") -> dict:
+    if installation_id and os.getenv("GITHUB_APP_ID"):
+        return _app_headers(installation_id, accept)
+    return _personal_headers(accept)
 
 
 def _handle_response(resp: httpx.Response, context: str) -> None:
@@ -40,7 +56,7 @@ def _handle_response(resp: httpx.Response, context: str) -> None:
         )
 
 
-def fetch_pr_diff(owner: str, repo: str, pr_number: int) -> str:
+def fetch_pr_diff(owner: str, repo: str, pr_number: int, installation_id: int = None) -> str:
     if not owner or not repo:
         raise HTTPException(status_code=422, detail="owner and repo must not be empty")
     if pr_number < 1:
@@ -50,7 +66,7 @@ def fetch_pr_diff(owner: str, repo: str, pr_number: int) -> str:
     try:
         resp = httpx.get(
             url,
-            headers=_headers("application/vnd.github.diff"),
+            headers=_headers(installation_id, "application/vnd.github.diff"),
             timeout=TIMEOUT,
             follow_redirects=True,
         )
@@ -66,10 +82,10 @@ def fetch_pr_diff(owner: str, repo: str, pr_number: int) -> str:
     return diff
 
 
-def fetch_pr_meta(owner: str, repo: str, pr_number: int) -> dict:
+def fetch_pr_meta(owner: str, repo: str, pr_number: int, installation_id: int = None) -> dict:
     url = f"{BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
-        resp = httpx.get(url, headers=_headers(), timeout=TIMEOUT, follow_redirects=True)
+        resp = httpx.get(url, headers=_headers(installation_id), timeout=TIMEOUT, follow_redirects=True)
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="GitHub timed out fetching PR metadata")
     except httpx.RequestError as e:
@@ -88,12 +104,12 @@ def fetch_pr_meta(owner: str, repo: str, pr_number: int) -> dict:
     }
 
 
-def post_comment(owner: str, repo: str, pr_number: int, body: str) -> str:
+def post_comment(owner: str, repo: str, pr_number: int, body: str, installation_id: int = None) -> str:
     url = f"{BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments"
     try:
         resp = httpx.post(
             url,
-            headers=_headers(),
+            headers=_headers(installation_id),
             json={"body": body},
             timeout=TIMEOUT,
         )
