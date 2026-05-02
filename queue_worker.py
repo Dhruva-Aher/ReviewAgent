@@ -4,6 +4,9 @@ import time
 import logging
 import asyncio
 
+from agents.base import AgentContext
+from orchestrator import run_multi_agent_review
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("queue_worker")
 
@@ -11,9 +14,6 @@ try:
     import redis
 except ImportError:
     raise ImportError("The 'redis' package is required to run the queue worker. Please install it with 'pip install redis'")
-
-from agents.base import AgentContext
-from orchestrator import run_multi_agent_review
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
