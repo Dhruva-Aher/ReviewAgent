@@ -44,7 +44,15 @@ def test_post_webhook_valid_signature():
         secret = b"my_secret"
         mac = hmac.new(secret, payload, hashlib.sha256).hexdigest()
         signature = f"sha256={mac}"
-        
+        mock_pipeline.return_value = {
+            "repo": "owner/repo",
+            "pr_number": 1,
+            "review": {"issues": [], "summary": "ok"},
+            "comment": "",
+            "comment_url": None,
+            "beliefs_updated": False,
+            "deduplicated": 0,
+        }
         response = client.post(
             "/webhook",
             content=payload,

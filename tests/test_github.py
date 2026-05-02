@@ -2,6 +2,10 @@ import pytest
 from unittest.mock import patch, MagicMock
 from github import fetch_pr_review_comments, post_review_with_inline_comments, post_comment
 
+@pytest.fixture(autouse=True)
+def set_github_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+
 def test_fetch_pr_review_comments():
     with patch("httpx.get") as mock_get:
         mock_resp = MagicMock()

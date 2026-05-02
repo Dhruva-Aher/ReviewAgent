@@ -51,13 +51,17 @@ def sample_context(sample_diff):
 
 @pytest.fixture
 def mock_groq():
-    with patch("reviewer._call_groq", new_callable=AsyncMock) as mock_call:
-        mock_call.return_value = json.dumps({
-            "comments": [{"type": "security", "severity": "high", "message": "Do not commit passwords", "suggestion": "Use env var", "reference": None, "confidence": 100, "file": "config.py", "line": 2}],
-            "issues": [{"type": "security", "severity": "high", "message": "Do not commit passwords", "suggestion": "Use env var", "reference": None, "confidence": 100, "file": "config.py", "line": 2}],
-            "summary": "Found security issues.",
-            "confidence": 85
-        })
+    mock_call = AsyncMock()
+    mock_call.return_value = json.dumps({
+        "comments": [{"type": "security", "severity": "high", "message": "Do not commit passwords", "suggestion": "Use env var", "reference": None, "confidence": 100, "file": "config.py", "line": 2}],
+        "issues": [{"type": "security", "severity": "high", "message": "Do not commit passwords", "suggestion": "Use env var", "reference": None, "confidence": 100, "file": "config.py", "line": 2}],
+        "summary": "Found security issues.",
+        "confidence": 85
+    })
+    
+    with patch("reviewer._call_groq", mock_call), \
+         patch("agents.impl._call_groq", mock_call), \
+         patch("os.getenv", side_effect=lambda k, *d: "test-key" if k == "GROQ_API_KEY" else os.environ.get(k, d[0] if d else None)):
         yield mock_call
 
 @pytest.fixture
