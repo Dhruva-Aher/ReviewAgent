@@ -1,22 +1,26 @@
-🧠 PRBeliefs — Institutional Memory for Code Reviews
+# 🧠 PRBeliefs — Institutional Memory for Code Reviews
 
-Apply your team’s past decisions to every pull request — automatically.
+> Apply your team’s past decisions to every pull request — automatically.
 
-PRBeliefs is an AI-powered GitHub App that reviews pull requests using institutional knowledge from past PRs, ensuring consistency, preventing regressions, and enforcing team decisions at scale.
+PRBeliefs is an AI-powered GitHub App that reviews pull requests using **institutional knowledge from past PRs**, ensuring consistency, preventing regressions, and enforcing team decisions at scale.
 
-🚀 Why PRBeliefs?
+---
+
+## 🚀 Why PRBeliefs?
 
 Traditional code review tools:
-
-❌ Don’t remember past decisions
-❌ Re-flag the same issues repeatedly
-❌ Lose context across PRs
+- ❌ Don’t remember past decisions  
+- ❌ Re-flag the same issues repeatedly  
+- ❌ Lose context across PRs  
 
 PRBeliefs introduces:
 
-Persistent team memory → applied in real-time to every PR
+> **Persistent team memory → applied in real-time to every PR**
 
-⚙️ How It Works
+---
+
+## ⚙️ How It Works
+
 GitHub PR
    ↓
 Webhook (FastAPI)
@@ -31,20 +35,30 @@ Structured Review Comment → GitHub
 🧩 System Architecture
 🔹 Multi-Agent Review System
 
-PRBeliefs uses a supervisor-routed multi-agent architecture:
 
-Security Agent → detects vulnerabilities
-Performance Agent → flags inefficiencies
-Style Agent → enforces conventions
-Architecture Agent → checks system design
-Dependency Agent → validates libraries
+---
 
-All agents run in parallel using asyncio.gather, then results are aggregated and ranked.
+## 🧩 System Architecture
 
-🔹 Beliefs Engine (Core Innovation)
+### 🔹 Multi-Agent Review System
 
-PRBeliefs stores team decisions from previous PRs:
+PRBeliefs uses a **supervisor-routed multi-agent architecture**:
 
+- Security Agent → detects vulnerabilities  
+- Performance Agent → flags inefficiencies  
+- Style Agent → enforces conventions  
+- Architecture Agent → checks system design  
+- Dependency Agent → validates libraries  
+
+All agents run **in parallel** using `asyncio.gather`, then results are aggregated and ranked.
+
+---
+
+### 🔹 Beliefs Engine (Core Innovation)
+
+PRBeliefs stores **team decisions from previous PRs**:
+
+```json
 {
   "rule": "Avoid pymysql",
   "reason": "Performance issues in production",
