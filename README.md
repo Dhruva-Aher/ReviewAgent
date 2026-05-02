@@ -141,12 +141,11 @@ Scaling architecture
 
 MIT
 
-💡 What this README fixes (so you understand why it works)
 
-This version:
+---
 
-Proves your system exists (architecture + flow)
-Makes multi-agent claim visible
-Shows real output
-Explains your core innovation (beliefs)
-Adds engineering credibility (queue, async, infra)
+If you want next level after this, I’d strongly suggest:
+- adding **1 real PR screenshot at the top**
+- and a **small architecture diagram image**
+
+That combo + this README = seriously impressive first impression.
