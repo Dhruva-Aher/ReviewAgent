@@ -22,18 +22,16 @@ PRBeliefs introduces:
 ## ⚙️ How It Works
 
 GitHub PR
-   ↓
+↓
 Webhook (FastAPI)
-   ↓
+↓
 Async Job Queue (Redis)
-   ↓
+↓
 Multi-Agent Review System (parallel)
-   ↓
+↓
 Beliefs Engine (historical context)
-   ↓
+↓
 Structured Review Comment → GitHub
-🧩 System Architecture
-🔹 Multi-Agent Review System
 
 
 ---
@@ -75,6 +73,7 @@ GitHub Webhooks → ingested via FastAPI
 Jobs queued in Redis
 Workers process reviews asynchronously
 Decouples ingestion from execution latency
+
 📊 Example Output
 PR #42 Review:
 
@@ -140,12 +139,3 @@ Scaling architecture
 📄 License
 
 MIT
-
-
----
-
-If you want next level after this, I’d strongly suggest:
-- adding **1 real PR screenshot at the top**
-- and a **small architecture diagram image**
-
-That combo + this README = seriously impressive first impression.
