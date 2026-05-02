@@ -4,5 +4,5 @@ def read():
     if 'repos' not in d:
         d['repos'] = {}
         belief_store.save(d)
-        
+
 read()

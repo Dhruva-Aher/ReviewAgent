@@ -1,5 +1,4 @@
 import pytest
-import sqlite3
 import json
 import os
 from unittest.mock import patch, AsyncMock
@@ -58,7 +57,7 @@ def mock_groq():
         "summary": "Found security issues.",
         "confidence": 85
     })
-    
+
     with patch("reviewer._call_groq", mock_call), \
          patch("agents.impl._call_groq", mock_call), \
          patch("os.getenv", side_effect=lambda k, *d: "test-key" if k == "GROQ_API_KEY" else os.environ.get(k, d[0] if d else None)):
@@ -71,6 +70,6 @@ def tmp_db(tmp_path):
     # Ensure init_db is called using the new path
     import store
     store.DB_PATH = db_path
-    
+
     init_db()
     yield str(db_path)

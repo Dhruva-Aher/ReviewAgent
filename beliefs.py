@@ -70,11 +70,11 @@ def append_decision(decision: str, repo: str = None) -> None:
 def format_for_prompt(beliefs: dict, repo: str = None) -> str:
     rules = list(beliefs.get("rules", []))
     decisions = list(beliefs.get("past_decisions", []))
-    
+
     if repo and "repos" in beliefs and repo in beliefs["repos"]:
         rules.extend(beliefs["repos"][repo].get("rules", []))
         decisions.extend(beliefs["repos"][repo].get("past_decisions", []))
-        
+
     parts = []
     if rules:
         rules_text = "\n".join(f"  - {r}" for r in rules)

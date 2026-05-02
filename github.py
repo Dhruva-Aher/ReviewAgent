@@ -123,28 +123,28 @@ def fetch_file_content(owner: str, repo: str, path: str, ref: str, installation_
 def fetch_pr_review_comments(owner: str, repo: str, pr_number: int, installation_id: int = None) -> list:
     url_commits = f"{BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/comments"
     url_issues = f"{BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    
+
     comments = []
-    
+
     try:
         resp1 = httpx.get(url_commits, headers=_headers(installation_id), timeout=TIMEOUT)
         if resp1.status_code == 200:
             comments.extend([c.get("body", "") for c in resp1.json() if c.get("body")])
-            
+
         resp2 = httpx.get(url_issues, headers=_headers(installation_id), timeout=TIMEOUT)
         if resp2.status_code == 200:
             comments.extend([c.get("body", "") for c in resp2.json() if c.get("body")])
     except httpx.RequestError as e:
         logger.error(f"Network error fetching PR comments: {e}")
-        
+
     return comments
 
 
 def fetch_bot_comments(owner: str, repo: str, pr_number: int, installation_id: int = None) -> list:
     url_issues = f"{BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    
+
     comments = []
-    
+
     try:
         resp = httpx.get(url_issues, headers=_headers(installation_id), timeout=TIMEOUT)
         if resp.status_code == 200:
@@ -154,16 +154,16 @@ def fetch_bot_comments(owner: str, repo: str, pr_number: int, installation_id: i
                     comments.append(c["body"])
     except httpx.RequestError as e:
         logger.error(f"Network error fetching bot comments: {e}")
-        
+
     return comments
 
 
 def post_review_with_inline_comments(owner: str, repo: str, pr_number: int, review_result: dict, installation_id: int = None) -> str:
     url = f"{BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-    
+
     issues = review_result.get("issues", [])
     inline_comments = []
-    
+
     for i in issues:
         file_path = i.get("file")
         line = i.get("line")
@@ -176,15 +176,15 @@ def post_review_with_inline_comments(owner: str, repo: str, pr_number: int, revi
                 "line": int(line),
                 "body": body
             })
-            
+
     if not inline_comments:
         return ""
-        
+
     payload = {
         "event": "COMMENT",
         "comments": inline_comments
     }
-    
+
     try:
         resp = httpx.post(
             url,
@@ -195,7 +195,7 @@ def post_review_with_inline_comments(owner: str, repo: str, pr_number: int, revi
     except httpx.RequestError as e:
         logger.error(f"Network error posting inline review: {e}")
         return ""
-        
+
     if resp.status_code == 422:
         logger.warning(f"GitHub returned 422 for inline comments on {owner}/{repo} PR #{pr_number}. Falling back to general comment.")
         import formatter
@@ -207,7 +207,7 @@ def post_review_with_inline_comments(owner: str, repo: str, pr_number: int, revi
     except HTTPException as e:
         logger.error(f"Failed to post GitHub inline review: {e.detail}")
         return ""
-        
+
     return resp.json().get("html_url", "")
 
 def post_comment(owner: str, repo: str, pr_number: int, body: str, installation_id: int = None) -> str:

@@ -1,4 +1,3 @@
-import sys
 
 content = open("main.py").read()
 content = content.replace("import beliefs as belief_store", "import store as belief_store")

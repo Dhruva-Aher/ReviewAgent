@@ -121,7 +121,7 @@ async def _run_pipeline(
             meta = github.fetch_pr_meta(owner, repo_name, pr_number, installation_id)
         except HTTPException:
             meta = {}
-            
+
     # Try fetching requirements.txt
     try:
         req_txt = github.fetch_file_content(owner, repo_name, "requirements.txt", meta.get("head", ""), installation_id)
@@ -134,7 +134,7 @@ async def _run_pipeline(
 
     beliefs_text = belief_store.format_for_prompt(_beliefs, repo=repo)
     logger.info(f"[REVIEW] Starting — {repo} PR #{pr_number} ({len(diff)} chars)")
-    
+
     # Parse changed files from diff
     changed_files = []
     for line in diff.split("\\n"):
@@ -178,7 +178,7 @@ async def _run_pipeline(
 
     if post_comment_flag:
         logger.info(f"[GITHUB] Posting comment — {repo} PR #{pr_number}")
-        
+
         inline_comments_posted = False
         if any(i.get("file") and i.get("line") for i in filtered_issues):
             try:
@@ -188,13 +188,13 @@ async def _run_pipeline(
                     inline_comments_posted = True
             except Exception as e:
                 logger.warning(f"Failed to post inline comments, falling back to regular comment. ({e})")
-        
+
         if not inline_comments_posted:
             comment_url = github.post_comment(owner, repo_name, pr_number, comment_body, installation_id)
             if comment_url:
                 logger.info(f"[GITHUB] Comment posted — {comment_url}")
             else:
-                logger.warning(f"[GITHUB] Comment failed — review printed to console")
+                logger.warning("[GITHUB] Comment failed — review printed to console")
 
     high_issues = [i for i in filtered_issues if i.get("severity") == "high"]
     if high_issues:
@@ -238,12 +238,12 @@ def get_beliefs(repo: Optional[str] = None):
 def add_belief(req: AddBeliefRequest):
     global _beliefs
     current = belief_store.load()
-    
+
     if req.repo:
         target = current.setdefault("repos", {}).setdefault(req.repo, {"rules": [], "past_decisions": []})
     else:
         target = current
-        
+
     if req.value in target[req.type]:
         return {"status": "already_exists", "beliefs": target}
     target[req.type].append(req.value)

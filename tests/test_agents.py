@@ -1,16 +1,16 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from agents.impl import SecurityAgent, ArchitectureAgent, PerformanceAgent, TestCoverageAgent, DependencyAgent, SynthesisAgent
+from agents.impl import SecurityAgent, ArchitectureAgent, PerformanceAgent, DependencyAgent, SynthesisAgent
 from agents.base import AgentResult
 
 @pytest.mark.asyncio
 async def test_relevance_hint(sample_context):
     sec = SecurityAgent()
     assert sec.relevance_hint(sample_context) is True
-    
+
     arch = ArchitectureAgent()
     assert arch.relevance_hint(sample_context) is True
-    
+
     perf = PerformanceAgent()
     assert perf.relevance_hint(sample_context) is True
 
@@ -39,7 +39,7 @@ async def test_synthesis_single_result(sample_context, mock_groq):
     agent = SynthesisAgent()
     results = [AgentResult("Agent", [{"message": "only issue"}], "Summary", False)]
     result = await agent.run(sample_context, results)
-    
+
     mock_groq.assert_not_called()
     assert len(result["issues"]) == 1
     assert result["issues"][0]["message"] == "only issue"
@@ -52,6 +52,6 @@ async def test_synthesis_multiple_results(sample_context, mock_groq):
         AgentResult("A2", [{"type": "bug", "severity": "low", "message": "issue 2", "suggestion": "fix 2"}], "Sum 2", False)
     ]
     result = await agent.run(sample_context, results)
-    
+
     mock_groq.assert_called_once()
     assert len(result["issues"]) > 0

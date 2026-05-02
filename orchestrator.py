@@ -15,9 +15,9 @@ async def run_multi_agent_review(context: AgentContext, selected_agents: list[st
         "TestCoverageAgent": TestCoverageAgent,
         "DependencyAgent": DependencyAgent,
     }
-    
+
     agents_to_run = [all_agent_classes[name]() for name in selected_agents if name in all_agent_classes]
-    
+
     async def run_with_timing(agent):
         start_time = time.monotonic()
         try:
@@ -33,12 +33,12 @@ async def run_multi_agent_review(context: AgentContext, selected_agents: list[st
             return AgentResult(agent.name, [], f"Crashed: {e}", True, str(e))
 
     relevant_agents = [a for a in agents_to_run if a.relevance_hint(context)]
-    
+
     # asyncio.gather receives coroutines
     coroutines = [run_with_timing(agent) for agent in relevant_agents]
-    
+
     results = await asyncio.gather(*coroutines, return_exceptions=True)
-    
+
     # Clean up results in case gather actually returned an exception obj
     clean_results = []
     for r in results:
@@ -47,9 +47,9 @@ async def run_multi_agent_review(context: AgentContext, selected_agents: list[st
             logger.error(f"Gather returned exception: {r}")
         else:
             clean_results.append(r)
-            
+
     # SynthesisAgent is called after gather completes
     synth = SynthesisAgent()
     final_review = await synth.run(context, clean_results)
-    
+
     return final_review

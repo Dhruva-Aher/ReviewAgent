@@ -1,6 +1,5 @@
 import pytest
 from fastapi.testclient import TestClient
-import json
 import hmac
 import hashlib
 from unittest.mock import patch, AsyncMock

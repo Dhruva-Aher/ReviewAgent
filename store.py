@@ -2,7 +2,7 @@ import sqlite3
 import logging
 import json
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -71,25 +71,25 @@ def init_db():
                     posted_at TEXT
                 )
             ''')
-            
+
     if LEGACY_JSON_PATH.exists():
         logger.info("Migrating beliefs.json to SQLite")
         try:
             with open(LEGACY_JSON_PATH, "r") as f:
                 data = json.loads(f.read())
-            
+
             # Migrate global rules/decisions
             global_rules = data.get("rules", [])
             global_decisions = data.get("past_decisions", [])
             _migrate_insert(None, "rule", global_rules)
             _migrate_insert(None, "decision", global_decisions)
-            
+
             # Migrate repo specific
             repos = data.get("repos", {})
             for r, rdata in repos.items():
                 _migrate_insert(r, "rule", rdata.get("rules", []))
                 _migrate_insert(r, "decision", rdata.get("past_decisions", []))
-                
+
             LEGACY_JSON_PATH.rename(LEGACY_JSON_PATH.with_suffix(".json.bak"))
             logger.info("Migration complete.")
         except Exception as e:
@@ -113,7 +113,7 @@ def load(repo=None) -> dict:
         for row in cursor:
             k = "rules" if row["type"] == "rule" else "past_decisions"
             result[k].append({"value": row["value"], "created_at": row["created_at"]})
-            
+
         # Load repo
         if repo:
             cursor = conn.execute("SELECT type, value, created_at FROM beliefs WHERE repo = ?", (repo,))
@@ -130,7 +130,7 @@ def append_decision(decision: str, repo: str = None) -> None:
         return
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
-        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'decision' AND value = ?", 
+        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'decision' AND value = ?",
                             (repo, repo, decision)).fetchone()
         if not curr:
             with conn:
@@ -140,7 +140,7 @@ def append_decision(decision: str, repo: str = None) -> None:
 def _add_rule(rule: str, repo: str = None) -> bool:
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
-        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'rule' AND value = ?", 
+        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'rule' AND value = ?",
                             (repo, repo, rule)).fetchone()
         if not curr:
             with conn:
@@ -152,19 +152,19 @@ def _add_rule(rule: str, repo: str = None) -> bool:
 def format_for_prompt(beliefs: dict, repo: str = None) -> str:
     rules = beliefs.get("rules", [])
     decisions = beliefs.get("past_decisions", [])
-    
+
     parts = []
     if rules:
         rules_text = "\\n".join(f"  - {r['value']}" if isinstance(r, dict) else f"  - {r}" for r in rules)
         parts.append(f"RULES:\\n{rules_text}")
-        
+
     if decisions:
         now = datetime.now(timezone.utc)
         valid_decisions = []
         for d in decisions:
             val = d['value'] if isinstance(d, dict) else d
             created_at_str = d.get('created_at') if isinstance(d, dict) else None
-            
+
             try:
                 if created_at_str:
                     # Handle Z suffix for fromisoformat in 3.10
@@ -175,18 +175,18 @@ def format_for_prompt(beliefs: dict, repo: str = None) -> str:
                     dt = now
             except ValueError:
                 dt = now
-                
+
             days_old = (now - dt).days
             if days_old > 180:
                 continue
             if days_old > 90:
                 val = f"[HISTORICAL - may be outdated] {val}"
             valid_decisions.append(val)
-            
+
         if valid_decisions:
             decisions_text = "\\n".join(f"  - {d}" for d in valid_decisions)
             parts.append(f"PAST DECISIONS:\\n{decisions_text}")
-            
+
     return "\\n\\n".join(parts) if parts else "No beliefs loaded."
 
 def log_review(repo, pr_number, issue_count, high_count):
@@ -225,11 +225,11 @@ def get_stats():
     with _get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM review_log").fetchone()
         stats["total_reviews"] = row[0] if row else 0
-        
+
         cursor = conn.execute("SELECT rule_text, SUM(hit_count) as total_hits FROM rule_hits GROUP BY rule_text ORDER BY total_hits DESC LIMIT 5")
         stats["top_violated_rules"] = [dict(r) for r in cursor]
-        
+
         cursor = conn.execute("SELECT repo, COUNT(*) as c FROM review_log GROUP BY repo")
         stats["reviews_by_repo"] = {r["repo"]: r["c"] for r in cursor}
-        
+
     return stats
