@@ -1,72 +1,84 @@
-import os
-import json
-from datetime import datetime, timedelta, timezone
-from store import load, append_decision, format_for_prompt, _add_rule
+from datetime import datetime, timezone
+from store import load, load_review_history, append_review_history, format_for_prompt, add_knowledge, _get_conn
 
 def test_load_empty(tmp_db):
-    beliefs = load()
-    assert beliefs["rules"] == []
-    assert beliefs["past_decisions"] == []
+    knowledge = load()
+    assert knowledge == []
+    
+    rh = load_review_history()
+    assert rh == []
 
 def test_save_and_load_round_trip(tmp_db):
-    _add_rule("Always use typing", None)
-    _add_rule("No print statements in this repo", "test/repo")
+    add_knowledge(None, "rule", "Always use typing")
+    add_knowledge("test/repo", "rule", "No print statements in this repo")
 
-    b_global = load()
-    assert len(b_global["rules"]) == 1
-    assert "Always use typing" in b_global["rules"][0]["value"]
+    k_global = load()
+    assert len(k_global) == 1
+    assert "Always use typing" in k_global[0]["text"]
 
-    b_repo = load("test/repo")
-    assert len(b_repo["rules"]) == 2
+    k_repo = load("test/repo")
+    assert len(k_repo) == 2
 
-def test_append_decision(tmp_db):
-    append_decision("Approved ignoring pylint for tests", "test/repo")
-    b = load("test/repo")
-    assert len(b["past_decisions"]) == 1
-    assert b["past_decisions"][0]["value"] == "Approved ignoring pylint for tests"
+def test_append_review_history(tmp_db):
+    append_review_history("DECISION: Approved ignoring pylint for tests", "test/repo", 1)
+    rh = load_review_history("test/repo")
+    assert len(rh) == 1
+    assert rh[0]["text"] == "DECISION: Approved ignoring pylint for tests"
+    assert rh[0]["pr_number"] == 1
 
-def test_format_for_prompt_historical_and_exclusion(tmp_db):
-    from store import _get_conn
+def test_format_for_prompt(tmp_db):
+    add_knowledge(None, "rule", "Critical rule", priority="critical")
+    add_knowledge(None, "rule", "High rule", priority="high")
+    add_knowledge(None, "rule", "Medium rule", priority="medium")
+    add_knowledge(None, "architecture", "Use sqlite")
+    
+    k = load()
+    prompt_lines = format_for_prompt(k, repo="test/repo")
+
+    assert "Repository Engineering Rules" in prompt_lines
+    assert "Critical\\n- Critical rule" in prompt_lines
+    assert "High\\n- High rule" in prompt_lines
+    assert "Medium\\n- Medium rule" in prompt_lines
+    assert "Architecture Decisions\\n- Use sqlite" in prompt_lines
+    assert "Context\\nRepository: test/repo" in prompt_lines
+
+def test_beliefs_v2_migration(tmp_db, tmp_path):
+    # Insert old data into beliefs manually
     with _get_conn() as conn:
         with conn:
-            # Add new belief
-            conn.execute("INSERT INTO beliefs (type, value, created_at) VALUES (?, ?, ?)",
-                         ("rule", "New rule", datetime.now(timezone.utc).isoformat()))
-
-            # Add 100-day old belief
-            old_date = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat()
-            conn.execute("INSERT INTO beliefs (type, value, created_at) VALUES (?, ?, ?)",
-                         ("decision", "Old decision", old_date))
-
-            # Add 200-day old belief
-            ancient_date = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
-            conn.execute("INSERT INTO beliefs (type, value, created_at) VALUES (?, ?, ?)",
-                         ("decision", "Ancient decision", ancient_date))
-
-    b = load()
-    prompt_lines = format_for_prompt(b)
-
-    # Excludes entries > 180 days
-    assert "Ancient decision" not in prompt_lines
-
-    # Prefixes [HISTORICAL] for 90-day-old entries
-    assert "New rule" in prompt_lines
-    assert "[HISTORICAL - may be outdated] Old decision" in prompt_lines
-
-def test_beliefs_json_migration(tmp_db, tmp_path):
-    json_path = tmp_path / "beliefs.json"
-    with open(json_path, 'w') as f:
-        json.dump({"rules": ["Migrated rule"]}, f)
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS beliefs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo TEXT,
+                    type TEXT,
+                    value TEXT,
+                    created_at TEXT
+                )
+            ''')
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute("INSERT INTO beliefs (repo, type, value, created_at) VALUES (?, ?, ?, ?)",
+                         (None, "rule", "Old rule", now))
+            conn.execute("INSERT INTO beliefs (repo, type, value, created_at) VALUES (?, ?, ?, ?)",
+                         ("test/repo", "decision", "Old decision", now))
+            conn.execute("INSERT INTO beliefs (repo, type, value, created_at) VALUES (?, ?, ?, ?)",
+                         ("test/repo", "decision", "[PR #42] Decided to do X", now))
 
     import store
-    store.LEGACY_JSON_PATH = json_path
-
-    store.init_db()
+    store._migrate_v2()
 
     # Verify data in SQLite
-    b = store.load()
-    assert "Migrated rule" in b["rules"][0]["value"]
+    k = store.load()
+    assert len(k) == 1
+    assert "Old rule" in k[0]["text"]
+    assert k[0]["kind"] == "rule"
+    
+    k_repo = store.load("test/repo")
+    assert len(k_repo) == 2
+    # One is global old rule, one is repo specific old decision -> architecture
+    arch_item = next(item for item in k_repo if item["kind"] == "architecture")
+    assert arch_item["text"] == "Old decision"
 
-    # Verify beliefs.json.bak exists and original is gone
-    assert os.path.exists(f"{str(json_path)}.bak")
-    assert not os.path.exists(str(json_path))
+    rh = store.load_review_history("test/repo")
+    assert len(rh) == 1
+    assert rh[0]["text"] == "[PR #42] Decided to do X"
+    assert rh[0]["pr_number"] == 42

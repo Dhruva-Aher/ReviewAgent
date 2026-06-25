@@ -24,25 +24,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("review_agent")
 
-_beliefs: dict = {}
+_knowledge: list = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     belief_store.init_db()
-    global _beliefs
-    _beliefs = belief_store.load()
+    global _knowledge
+    _knowledge = belief_store.load()
     logger.info(
-        f"ReviewAgent started — "
-        f"{len(_beliefs['rules'])} rule(s), "
-        f"{len(_beliefs['past_decisions'])} past decision(s)"
+        f"ReviewAgent started — loaded {len(_knowledge)} active knowledge item(s)"
     )
     yield
 
 
 app = FastAPI(
     title="ReviewAgent",
-    description="Autonomous PR review agent with persistent belief system",
+    description="Autonomous PR review agent with persistent knowledge system",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -77,24 +75,41 @@ class ReviewRequest(BaseModel):
         return v
 
 
-class AddBeliefRequest(BaseModel):
-    type: str
-    value: str
+class AddKnowledgeRequest(BaseModel):
+    kind: str
+    text: str
     repo: Optional[str] = None
+    category: str = "maintainability"
+    priority: str = "medium"
+    scope: str = "repository"
 
-    @field_validator("type")
+    @field_validator("kind")
     @classmethod
-    def validate_type(cls, v: str) -> str:
-        if v not in ("rules", "past_decisions"):
-            raise ValueError("type must be 'rules' or 'past_decisions'")
+    def validate_kind(cls, v: str) -> str:
+        if v not in ("rule", "architecture"):
+            raise ValueError("kind must be 'rule' or 'architecture'")
         return v
 
-    @field_validator("value")
+    @field_validator("text")
     @classmethod
-    def validate_value(cls, v: str) -> str:
+    def validate_text(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("value must not be empty")
+            raise ValueError("text must not be empty")
+        return v
+        
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, v: str) -> str:
+        if v not in ("critical", "high", "medium", "low"):
+            raise ValueError("priority must be critical, high, medium, or low")
+        return v
+        
+    @field_validator("scope")
+    @classmethod
+    def validate_scope(cls, v: str) -> str:
+        if v not in ("global", "repository", "directory", "file"):
+            raise ValueError("scope must be global, repository, directory, or file")
         return v
 
 
@@ -108,7 +123,7 @@ async def _run_pipeline(
     post_comment_flag: bool,
     installation_id: int = None,
 ) -> dict:
-    global _beliefs
+    global _knowledge
 
     owner, repo_name = repo.split("/")
     meta = {}
@@ -132,7 +147,7 @@ async def _run_pipeline(
     if not diff:
         raise HTTPException(status_code=422, detail="Diff is empty — nothing to review")
 
-    beliefs_text = belief_store.format_for_prompt(_beliefs, repo=repo)
+    beliefs_text = belief_store.format_for_prompt(_knowledge, repo=repo)
     logger.info(f"[REVIEW] Starting — {repo} PR #{pr_number} ({len(diff)} chars)")
 
     # Parse changed files from diff
@@ -203,9 +218,8 @@ async def _run_pipeline(
             f"PR #{pr_number} in {repo}: flagged {len(high_issues)} "
             f"high-severity issue(s) — {high_issues[0]['message'][:80]}"
         )
-        belief_store.append_decision(decision, repo=repo)
-        _beliefs = belief_store.load()
-        logger.info(f"[BELIEFS] Updated with finding from {repo} PR #{pr_number}")
+        belief_store.append_review_history(decision, repo=repo, pr_number=pr_number)
+        logger.info(f"[HISTORY] Appended high severity findings to review history for {repo} PR #{pr_number}")
 
     return {
         "repo": repo,
@@ -222,41 +236,38 @@ async def _run_pipeline(
 def health():
     return {
         "status": "ok",
-        "beliefs": len(_beliefs.get("rules", [])),
+        "knowledge_count": len(_knowledge),
         "mode": "github_app" if os.getenv("GITHUB_APP_ID") else "personal_token"
     }
 
 
-@app.get("/beliefs")
-def get_beliefs(repo: Optional[str] = None):
-    b = belief_store.load()
-    if repo:
-        return b.get("repos", {}).get(repo, {"rules": [], "past_decisions": []})
-    return {k: v for k, v in b.items() if k != "repos"}
+@app.get("/knowledge")
+def get_knowledge(repo: Optional[str] = None):
+    return belief_store.load(repo=repo)
 
 
-@app.post("/beliefs")
-def add_belief(req: AddBeliefRequest):
-    global _beliefs
+@app.post("/knowledge")
+def add_knowledge(req: AddKnowledgeRequest):
+    global _knowledge
     repo_msg = f" for repo {req.repo}" if req.repo else " globally"
 
-    if req.type == "rules":
-        added = belief_store._add_rule(req.value, repo=req.repo)
-    else:
-        # Check if decision already exists before appending
-        current = belief_store.load(req.repo)
-        existing = [item["value"] if isinstance(item, dict) else item for item in current["past_decisions"]]
-        if req.value in existing:
-            return {"status": "already_exists"}
-        belief_store.append_decision(req.value, repo=req.repo)
-        added = True
+    belief_store.add_knowledge(
+        repo=req.repo,
+        kind=req.kind,
+        text=req.text,
+        category=req.category,
+        priority=req.priority,
+        scope=req.scope
+    )
 
-    if not added:
-        return {"status": "already_exists"}
+    _knowledge = belief_store.load()
+    logger.info(f"[KNOWLEDGE] Added {req.kind}{repo_msg}: {req.text[:60]}")
+    return {"status": "added", "knowledge": belief_store.load(req.repo)}
 
-    _beliefs = belief_store.load()
-    logger.info(f"[BELIEFS] Added to '{req.type}'{repo_msg}: {req.value[:60]}")
-    return {"status": "added", "beliefs": belief_store.load(req.repo)}
+
+@app.get("/review-history")
+def get_review_history(repo: Optional[str] = None):
+    return belief_store.load_review_history(repo=repo)
 
 
 @app.post("/review")
@@ -317,7 +328,7 @@ async def webhook(request: Request):
     if installation_id:
         check_rate_limit(installation_id)
 
-    # auto-extract decisions from closed PRs
+    # auto-extract decisions from closed PRs into review_history
     if action == "closed" and pr.get("merged"):
         logger.info(f"[WEBHOOK] PR #{pr_number} merged in {repo}. Scanning for DECISION comments...")
         comments = github.fetch_pr_review_comments(owner, repo_name, pr_number, installation_id)
@@ -327,7 +338,7 @@ async def webhook(request: Request):
             if msg.startswith("DECISION:"):
                 decision_text = msg[len("DECISION:"):].strip()
                 if decision_text:
-                    belief_store.append_decision(f"[PR #{pr_number}] {decision_text}", repo=repo)
+                    belief_store.append_review_history(f"DECISION: {decision_text}", repo=repo, pr_number=pr_number)
                     found += 1
         return {"status": "merged_processed", "decisions_extracted": found}
 

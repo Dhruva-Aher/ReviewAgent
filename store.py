@@ -22,12 +22,37 @@ def _get_conn():
 def init_db():
     with _get_conn() as conn:
         with conn:
+            # We keep beliefs for backward compatibility during migration
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS beliefs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     repo TEXT,
                     type TEXT,
                     value TEXT,
+                    created_at TEXT
+                )
+            ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS knowledge (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo TEXT,
+                    kind TEXT,
+                    text TEXT,
+                    category TEXT DEFAULT 'maintainability',
+                    priority TEXT DEFAULT 'medium',
+                    scope TEXT DEFAULT 'repository',
+                    enabled BOOLEAN DEFAULT 1,
+                    source TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+            ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS review_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo TEXT,
+                    pr_number INTEGER,
+                    text TEXT,
                     created_at TEXT
                 )
             ''')
@@ -71,27 +96,29 @@ def init_db():
                     posted_at TEXT
                 )
             ''')
+    
+    _migrate_json()
+    _migrate_v2()
 
+def _migrate_json():
     if LEGACY_JSON_PATH.exists():
         logger.info("Migrating beliefs.json to SQLite")
         try:
             with open(LEGACY_JSON_PATH, "r") as f:
                 data = json.loads(f.read())
 
-            # Migrate global rules/decisions
             global_rules = data.get("rules", [])
             global_decisions = data.get("past_decisions", [])
             _migrate_insert(None, "rule", global_rules)
             _migrate_insert(None, "decision", global_decisions)
 
-            # Migrate repo specific
             repos = data.get("repos", {})
             for r, rdata in repos.items():
                 _migrate_insert(r, "rule", rdata.get("rules", []))
                 _migrate_insert(r, "decision", rdata.get("past_decisions", []))
 
             LEGACY_JSON_PATH.rename(LEGACY_JSON_PATH.with_suffix(".json.bak"))
-            logger.info("Migration complete.")
+            logger.info("JSON Migration complete.")
         except Exception as e:
             logger.error(f"Failed to migrate beliefs.json: {e}")
 
@@ -105,89 +132,139 @@ def _migrate_insert(repo, btype, values):
                     (repo, btype, v, now)
                 )
 
-def load(repo=None) -> dict:
-    result = {"rules": [], "past_decisions": []}
+def _migrate_v2():
+    """Migrates from beliefs table to knowledge and review_history"""
+    with _get_conn() as conn:
+        # Check if we already migrated
+        count = conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0]
+        count_rh = conn.execute("SELECT COUNT(*) FROM review_history").fetchone()[0]
+        if count > 0 or count_rh > 0:
+            return
+
+        cursor = conn.execute("SELECT * FROM beliefs")
+        rows = cursor.fetchall()
+        if not rows:
+            return
+            
+        logger.info(f"Migrating {len(rows)} rows from beliefs to v2 schema...")
+        now = datetime.now(timezone.utc).isoformat()
+        
+        with conn:
+            for r in rows:
+                repo = r["repo"]
+                btype = r["type"]
+                val = r["value"]
+                created_at = r["created_at"]
+                
+                if btype == "rule":
+                    scope = "global" if not repo else "repository"
+                    conn.execute('''
+                        INSERT INTO knowledge (repo, kind, text, category, priority, scope, enabled, source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (repo, "rule", val, "maintainability", "medium", scope, 1, "migration", created_at, now))
+                elif btype == "decision":
+                    if "[PR #" in val or val.startswith("PR #"):
+                        # Attempt to extract PR number if possible, else 0
+                        import re
+                        match = re.search(r'PR #(\d+)', val)
+                        pr_num = int(match.group(1)) if match else 0
+                        conn.execute('''
+                            INSERT INTO review_history (repo, pr_number, text, created_at)
+                            VALUES (?, ?, ?, ?)
+                        ''', (repo, pr_num, val, created_at))
+                    else:
+                        scope = "global" if not repo else "repository"
+                        conn.execute('''
+                            INSERT INTO knowledge (repo, kind, text, category, priority, scope, enabled, source, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (repo, "architecture", val, "maintainability", "medium", scope, 1, "migration", created_at, now))
+
+def load(repo=None) -> list:
+    results = []
     with _get_conn() as conn:
         # Load global
-        cursor = conn.execute("SELECT type, value, created_at FROM beliefs WHERE repo IS NULL")
+        cursor = conn.execute("SELECT * FROM knowledge WHERE repo IS NULL AND enabled = 1")
         for row in cursor:
-            k = "rules" if row["type"] == "rule" else "past_decisions"
-            result[k].append({"value": row["value"], "created_at": row["created_at"]})
-
+            results.append(dict(row))
+            
         # Load repo
         if repo:
-            cursor = conn.execute("SELECT type, value, created_at FROM beliefs WHERE repo = ?", (repo,))
+            cursor = conn.execute("SELECT * FROM knowledge WHERE repo = ? AND enabled = 1", (repo,))
             for row in cursor:
-                k = "rules" if row["type"] == "rule" else "past_decisions"
-                result[k].append({"value": row["value"], "created_at": row["created_at"]})
-    return result
+                results.append(dict(row))
+    return results
 
-def save(data: dict, repo=None) -> None:
-    pass
+def load_review_history(repo=None) -> list:
+    results = []
+    with _get_conn() as conn:
+        if repo:
+            cursor = conn.execute("SELECT * FROM review_history WHERE repo = ? ORDER BY created_at DESC", (repo,))
+        else:
+            cursor = conn.execute("SELECT * FROM review_history ORDER BY created_at DESC")
+        for row in cursor:
+            results.append(dict(row))
+    return results
 
-def append_decision(decision: str, repo: str = None) -> None:
-    if not decision or not decision.strip():
+def append_review_history(text: str, repo: str = None, pr_number: int = 0) -> None:
+    if not text or not text.strip():
         return
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
-        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'decision' AND value = ?",
-                            (repo, repo, decision)).fetchone()
-        if not curr:
-            with conn:
-                conn.execute("INSERT INTO beliefs (repo, type, value, created_at) VALUES (?, ?, ?, ?)",
-                             (repo, "decision", decision, now))
+        with conn:
+            conn.execute("INSERT INTO review_history (repo, pr_number, text, created_at) VALUES (?, ?, ?, ?)",
+                         (repo, pr_number, text, now))
 
-def _add_rule(rule: str, repo: str = None) -> bool:
+def add_knowledge(repo: str, kind: str, text: str, category: str = "maintainability", priority: str = "medium", scope: str = "repository") -> int:
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
-        curr = conn.execute("SELECT 1 FROM beliefs WHERE (repo IS ? OR repo = ?) AND type = 'rule' AND value = ?",
-                            (repo, repo, rule)).fetchone()
-        if not curr:
-            with conn:
-                conn.execute("INSERT INTO beliefs (repo, type, value, created_at) VALUES (?, ?, ?, ?)",
-                             (repo, "rule", rule, now))
-            return True
-    return False
+        with conn:
+            cur = conn.execute('''
+                INSERT INTO knowledge (repo, kind, text, category, priority, scope, enabled, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (repo, kind, text, category, priority, scope, 1, "api", now, now))
+            return cur.lastrowid
 
-def format_for_prompt(beliefs: dict, repo: str = None) -> str:
-    rules = beliefs.get("rules", [])
-    decisions = beliefs.get("past_decisions", [])
+def format_for_prompt(knowledge_items: list, repo: str = None) -> str:
+    rules_critical = []
+    rules_high = []
+    rules_medium = []
+    rules_low = []
+    architecture = []
+    
+    for k in knowledge_items:
+        text = k["text"]
+        if k["kind"] == "rule":
+            pri = k.get("priority", "medium").lower()
+            if pri == "critical":
+                rules_critical.append(text)
+            elif pri == "high":
+                rules_high.append(text)
+            elif pri == "low":
+                rules_low.append(text)
+            else:
+                rules_medium.append(text)
+        elif k["kind"] == "architecture":
+            architecture.append(text)
 
     parts = []
-    if rules:
-        rules_text = "\\n".join(f"  - {r['value']}" if isinstance(r, dict) else f"  - {r}" for r in rules)
-        parts.append(f"RULES:\\n{rules_text}")
+    if rules_critical or rules_high or rules_medium or rules_low:
+        parts.append("Repository Engineering Rules")
+        if rules_critical:
+            parts.append("Critical\\n" + "\\n".join(f"- {r}" for r in rules_critical))
+        if rules_high:
+            parts.append("High\\n" + "\\n".join(f"- {r}" for r in rules_high))
+        if rules_medium:
+            parts.append("Medium\\n" + "\\n".join(f"- {r}" for r in rules_medium))
+        if rules_low:
+            parts.append("Low\\n" + "\\n".join(f"- {r}" for r in rules_low))
+            
+    if architecture:
+        parts.append("Architecture Decisions\\n" + "\\n".join(f"- {a}" for a in architecture))
 
-    if decisions:
-        now = datetime.now(timezone.utc)
-        valid_decisions = []
-        for d in decisions:
-            val = d['value'] if isinstance(d, dict) else d
-            created_at_str = d.get('created_at') if isinstance(d, dict) else None
-
-            try:
-                if created_at_str:
-                    # Handle Z suffix for fromisoformat in 3.10
-                    dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                else:
-                    dt = now
-            except ValueError:
-                dt = now
-
-            days_old = (now - dt).days
-            if days_old > 180:
-                continue
-            if days_old > 90:
-                val = f"[HISTORICAL - may be outdated] {val}"
-            valid_decisions.append(val)
-
-        if valid_decisions:
-            decisions_text = "\\n".join(f"  - {d}" for d in valid_decisions)
-            parts.append(f"PAST DECISIONS:\\n{decisions_text}")
-
-    return "\\n\\n".join(parts) if parts else "No beliefs loaded."
+    # Add Context section
+    parts.append(f"Context\\nRepository: {repo or 'Unknown'}\\nLanguage: Python\\nFramework: None")
+    
+    return "\\n\\n".join(parts)
 
 def log_review(repo, pr_number, issue_count, high_count):
     now = datetime.now(timezone.utc).isoformat()

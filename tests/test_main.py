@@ -18,20 +18,22 @@ def test_health_returns_200():
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
-def test_get_beliefs():
-    response = client.get("/beliefs")
+def test_get_knowledge():
+    response = client.get("/knowledge")
     assert response.status_code == 200
-    assert "rules" in response.json()
-    assert "past_decisions" in response.json()
+    assert isinstance(response.json(), list)
 
-def test_post_beliefs():
-    response = client.post("/beliefs", json={"type": "rules", "value": "New global rule"})
+def test_post_knowledge():
+    response = client.post("/knowledge", json={
+        "kind": "rule",
+        "text": "New global rule"
+    })
     assert response.status_code == 200
     assert response.json()["status"] == "added"
-    rules = response.json()["beliefs"]["rules"]
+    knowledge = response.json()["knowledge"]
     assert any(
-        (r["value"] if isinstance(r, dict) else r) == "New global rule"
-        for r in rules
+        (k["text"] if isinstance(k, dict) else k) == "New global rule"
+        for k in knowledge
     )
 
 def test_post_review():

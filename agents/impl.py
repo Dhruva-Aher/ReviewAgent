@@ -9,12 +9,27 @@ logger = logging.getLogger(__name__)
 # Shared system prompt for all specialist agents.
 # Each agent receives a different focus area in the user message.
 _AGENT_SYSTEM_PROMPT = """\
+PROMPT_MARKER_PRBELIEFS_DEBUG
 You are a senior software engineer doing a focused code review.
 
-Your job is to find real problems — bugs, vulnerabilities, and design issues — not style nits.
+Your job is to find real problems — bugs, vulnerabilities, and design issues.
 
-DO NOT comment on: formatting, missing docstrings, import ordering, naming preferences,
-or cosmetic issues that do not affect correctness or security.
+STYLE COMMENTS ARE DISABLED.
+
+Never comment on:
+* type hints
+* return type annotations
+* parameter annotations
+* docstrings
+* formatting
+* naming
+* whitespace
+* import ordering
+* line length
+
+These findings are invalid.
+
+If they are the only issues, approve the pull request.
 
 Return at most 3 issues. Prioritize severity. If there are no real issues, return an empty list.
 
