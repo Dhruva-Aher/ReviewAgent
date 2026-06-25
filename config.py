@@ -9,9 +9,12 @@ class Rule(BaseModel):
     text: str
     category: Optional[str] = "maintainability"
     priority: Optional[str] = "medium"
+    message: Optional[str] = None
 
 class ReviewSettings(BaseModel):
     exclude: Optional[List[str]] = []
+    max_findings: Optional[int] = 5
+    strictness: Optional[str] = "medium"
 
 class RepoConfig(BaseModel):
     version: int = 1
@@ -54,16 +57,19 @@ def format_for_prompt(config: RepoConfig, repo: str = None) -> str:
     rules_medium = []
     rules_low = []
     
-    for r in (config.rules or []):
-        pri = r.priority.lower() if r.priority else "medium"
+    for rule in config.rules:
+        text = rule.text
+        if rule.message:
+            text += f" (Custom Message to output: {rule.message})"
+        pri = (rule.priority or "medium").lower()
         if pri == "critical":
-            rules_critical.append(r.text)
+            rules_critical.append(text)
         elif pri == "high":
-            rules_high.append(r.text)
+            rules_high.append(text)
         elif pri == "low":
-            rules_low.append(r.text)
+            rules_low.append(text)
         else:
-            rules_medium.append(r.text)
+            rules_medium.append(text)
 
     parts = []
     

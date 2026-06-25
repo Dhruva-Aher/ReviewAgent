@@ -14,6 +14,12 @@ You are a senior software engineer doing a focused code review.
 
 Your job is to find real problems — bugs, vulnerabilities, and design issues.
 
+SEVERITY DEFINITIONS (Strictly Follow):
+- Critical: SQL injection, hardcoded secrets, authentication flaws, privilege escalation, command injection.
+- High: Security issues, data corruption, race conditions, missing validation, resource leaks.
+- Medium: Async misuse, API misuse, correctness bugs, maintainability problems.
+- Low: Performance improvements, edge cases, optional suggestions.
+
 STYLE COMMENTS ARE DISABLED.
 
 Never comment on:
@@ -29,11 +35,21 @@ Never comment on:
 
 These findings are invalid.
 
-If they are the only issues, approve the pull request.
+If the PR is genuinely good:
+Approve it. Do not invent feedback. If there are no real issues, return an empty list.
 
-Return at most 3 issues. Prioritize severity. If there are no real issues, return an empty list.
+CONFIDENCE CALIBRATION:
+Use exactly one of: "high", "medium", or "low".
+Never fabricate precision or use numbers.
 
-Every issue must:
+REPOSITORY AWARENESS:
+When referencing a repository rule, reference it naturally.
+Instead of "Repository rule violated", say "This repository explicitly avoids X. This change conflicts with that engineering standard."
+
+ISSUE LIMIT:
+Target 0 to {max_findings} findings. Prioritize severity. Never create comments simply to comment.
+
+EVERY issue must:
 - Reference the actual code from the diff (file name and line)
 - Explain what is wrong and why it matters in production
 - Suggest a concrete fix
@@ -45,11 +61,11 @@ Schema:
   "issues": [
     {
       "type": "bug | security | performance | architecture",
-      "severity": "low | medium | high",
+      "severity": "low | medium | high | critical",
       "message": "...",
       "suggestion": "...",
-      "reference": null,
-      "confidence": 85,
+      "reference": "Natural explanation of the team rule or past decision this violates, or null",
+      "confidence": "high | medium | low",
       "file": "path/to/file.py",
       "line": 42
     }
@@ -131,8 +147,10 @@ PR TITLE: {context.pr_title}
 --- DIFF ---
 {context.diff[:80000]}"""
 
+    system_prompt = _AGENT_SYSTEM_PROMPT.replace("{max_findings}", str(context.max_findings))
+
     messages = [
-        {"role": "system", "content": _AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
 
@@ -252,7 +270,7 @@ class DependencyAgent(BaseAgent):
 def synthesize_results(results: list[AgentResult]) -> dict:
     """
     Combine results from all agents into a single review dict.
-    Uses deterministic deduplication — no extra LLM call.
+    Uses deterministic deduplication and summary generation — no extra LLM call.
     """
     valid = [r for r in results if not r.skipped]
 
@@ -260,12 +278,38 @@ def synthesize_results(results: list[AgentResult]) -> dict:
         return {"issues": [], "summary": "All agents skipped or failed — no review generated."}
 
     if len(valid) == 1:
-        return {"issues": valid[0].issues, "summary": valid[0].summary}
-
-    all_issues = [issue for r in valid for issue in r.issues]
+        # For single agent testing
+        all_issues = valid[0].issues
+    else:
+        all_issues = [issue for r in valid for issue in r.issues]
+        
     deduped = _deduplicate_issues(all_issues)
+    
+    if not deduped:
+        summary = "Overall Assessment\n\nThe implementation looks solid. No critical or high-severity issues were identified. Approve."
+        return {"issues": deduped, "summary": summary}
 
-    agent_summaries = "; ".join(r.summary for r in valid if r.summary and r.summary != "Failed")
-    summary = agent_summaries if agent_summaries else "Review complete."
+    counts = {"security": 0, "bug": 0, "performance": 0, "architecture": 0, "other": 0}
+    for issue in deduped:
+        t = issue.get("type", "bug")
+        if t in counts:
+            counts[t] += 1
+        else:
+            counts["other"] += 1
 
+    parts = []
+    for k, v in counts.items():
+        if v > 0:
+            name = "correctness issue" if k == "bug" else f"{k} issue"
+            if v > 1:
+                name += "s"
+            parts.append(f"{v} {name}")
+    
+    issues_str = " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 2 else parts)
+    
+    summary = f"Overall Assessment\n\nThis pull request contains {issues_str} that should be reviewed."
+    
+    if counts["architecture"] == 0:
+        summary += "\n\nNo architectural concerns were identified."
+        
     return {"issues": deduped, "summary": summary}

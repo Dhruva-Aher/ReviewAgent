@@ -11,6 +11,7 @@ class AgentContext:
     pr_description: str
     changed_files: List[str]
     config: dict
+    max_findings: int = 5
 
 @dataclass
 class AgentResult:

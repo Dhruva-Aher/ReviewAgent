@@ -16,6 +16,30 @@
           ],
           "default": [],
           "title": "Exclude"
+        },
+        "max_findings": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 5,
+          "title": "Max Findings"
+        },
+        "strictness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "medium",
+          "title": "Strictness"
         }
       },
       "title": "ReviewSettings",
@@ -50,6 +74,18 @@
           ],
           "default": "medium",
           "title": "Priority"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
         }
       },
       "required": [

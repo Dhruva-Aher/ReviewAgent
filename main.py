@@ -66,6 +66,19 @@ class ReviewRequest(BaseModel):
             raise ValueError("pr_number must be a positive integer")
         return v
 
+class DebugReviewRequest(BaseModel):
+    repository: str
+    diff: str
+    config: Optional[str] = None
+
+    @field_validator("repository")
+    @classmethod
+    def validate_repo(cls, v: str) -> str:
+        parts = v.strip().split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("repository must be in 'owner/repo' format")
+        return v.strip()
+
 CONFIDENCE_THRESHOLD = int(os.getenv("CONFIDENCE_THRESHOLD", "60"))
 MULTI_AGENT = os.getenv("MULTI_AGENT", "true").lower() != "false"
 
@@ -113,6 +126,10 @@ async def _run_pipeline(
         if line.startswith("+++ b/"):
             changed_files.append(line[6:].strip())
 
+    max_findings = 5
+    if repo_config.review and repo_config.review.max_findings is not None:
+        max_findings = repo_config.review.max_findings
+
     if MULTI_AGENT:
         context = AgentContext(
             diff=diff,
@@ -122,7 +139,8 @@ async def _run_pipeline(
             pr_title=meta.get("title", ""),
             pr_description=meta.get("body", ""),
             changed_files=changed_files,
-            config={"requirements_txt": req_txt}
+            config={"requirements_txt": req_txt},
+            max_findings=max_findings
         )
         agents_to_run = ["SecurityAgent", "ArchitectureAgent", "PerformanceAgent", "TestCoverageAgent", "DependencyAgent"]
         review_result = await orchestrator.run_multi_agent_review(context, agents_to_run)
@@ -132,6 +150,7 @@ async def _run_pipeline(
             beliefs_text=beliefs_text,
             repo=repo,
             pr_number=pr_number,
+            max_findings=max_findings
         )
 
     original_issues = review_result.get("issues", [])
@@ -251,6 +270,63 @@ def export_knowledge(repo: Optional[str] = None):
 @app.get("/review-history")
 def get_review_history(repo: Optional[str] = None):
     return belief_store.load_review_history(repo=repo)
+
+
+@app.post("/debug/review")
+async def debug_review(req: DebugReviewRequest):
+    is_debug = os.getenv("DEBUG", "").lower() == "true"
+    is_dev = os.getenv("ENVIRONMENT", "").lower() == "development"
+    if not (is_debug or is_dev):
+        raise HTTPException(status_code=403, detail="Debug endpoint is disabled in production")
+
+    repo_config = config.parse_yaml(req.config or "")
+    beliefs_text = config.format_for_prompt(repo_config, repo=req.repository)
+
+    changed_files = []
+    for line in req.diff.split("\n"):
+        if line.startswith("+++ b/"):
+            changed_files.append(line[6:].strip())
+
+    max_findings = 5
+    if repo_config.review and repo_config.review.max_findings is not None:
+        max_findings = repo_config.review.max_findings
+
+    if MULTI_AGENT:
+        context = AgentContext(
+            diff=req.diff,
+            beliefs_text=beliefs_text,
+            repo=req.repository,
+            pr_number=0,
+            pr_title="Debug PR",
+            pr_description="",
+            changed_files=changed_files,
+            config={},
+            max_findings=max_findings
+        )
+        agents_to_run = ["SecurityAgent", "ArchitectureAgent", "PerformanceAgent", "TestCoverageAgent", "DependencyAgent"]
+        review_result = await orchestrator.run_multi_agent_review(context, agents_to_run)
+        
+        # Build prompt from one of the agents (SecurityAgent) as representation
+        from agents.impl import _AGENT_FOCUSES, _AGENT_SYSTEM_PROMPT
+        focus = _AGENT_FOCUSES.get("SecurityAgent", "")
+        prompt = f"{focus}\n\nREPO: {context.repo}\nPR: #{context.pr_number}\nPR TITLE: {context.pr_title}\n\n--- TEAM RULES AND PAST DECISIONS ---\n{context.beliefs_text}\n\n--- DIFF ---\n{context.diff[:80000]}"
+        system_prompt = _AGENT_SYSTEM_PROMPT.replace("{max_findings}", str(max_findings))
+    else:
+        review_result = await reviewer.run_review(
+            diff=req.diff,
+            beliefs_text=beliefs_text,
+            repo=req.repository,
+            pr_number=0,
+            max_findings=max_findings
+        )
+        prompt = reviewer._build_prompt(req.diff, beliefs_text, req.repository, 0)
+        system_prompt = reviewer.SYSTEM_PROMPT.replace("{max_findings}", str(max_findings))
+
+    return {
+        "findings": review_result.get("issues", []),
+        "summary": review_result.get("summary", ""),
+        "prompt": {"system": system_prompt, "user": prompt}
+    }
 
 
 @app.post("/review")

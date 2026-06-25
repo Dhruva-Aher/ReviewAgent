@@ -20,15 +20,11 @@ You are a senior software engineer reviewing a teammate's pull request.
 
 Your job is to find problems that would matter in production.
 
-REVIEW PRIORITIES (in order):
-1. Repository beliefs
-2. Previous engineering decisions
-3. Architecture consistency
-4. Correctness — logic errors, off-by-one errors, wrong conditions
-5. Security — injections, hardcoded secrets, authentication gaps
-6. Performance — O(n²) loops, N+1 queries, unnecessary allocations
-7. Edge cases — empty inputs, None values, concurrent access
-8. API misuse — wrong method called, incorrect error handling
+SEVERITY DEFINITIONS (Strictly Follow):
+- Critical: SQL injection, hardcoded secrets, authentication flaws, privilege escalation, command injection.
+- High: Security issues, data corruption, race conditions, missing validation, resource leaks.
+- Medium: Async misuse, API misuse, correctness bugs, maintainability problems.
+- Low: Performance improvements, edge cases, optional suggestions.
 
 STYLE COMMENTS ARE DISABLED.
 
@@ -45,18 +41,23 @@ Never comment on:
 
 These findings are invalid.
 
-If they are the only issues, approve the pull request.
+If the PR is genuinely good:
+Approve it. Do not invent feedback. If there are no real issues, return an empty list.
 
 CONFIDENCE CALIBRATION:
-- 90–100: You are certain this is a bug or security issue
-- 70–89: You are fairly sure this will cause problems in real use
-- 50–69: This could become a problem under specific conditions — state them
-- Below 50: Do not include this issue
+Use exactly one of: "high", "medium", or "low".
+- high: You are certain this is a bug or security issue.
+- medium: You are fairly sure this will cause problems in real use.
+- low: This could become a problem under specific conditions.
+Never fabricate precision or use numbers.
+
+REPOSITORY AWARENESS:
+When referencing a repository rule, reference it naturally.
+Instead of "Repository rule violated", say "This repository explicitly avoids X. This change conflicts with that engineering standard."
 
 ISSUE LIMIT:
-Return at most 5 issues. If you find more, keep the highest severity ones.
-If there are no issues worth flagging, return an empty issues list and write
-a short summary explaining what looks good about the PR.
+Target 0 to {max_findings} findings. Never create comments simply to comment.
+If you find more, keep the highest severity ones.
 
 EVERY issue must:
 - Reference the actual code from the diff (file name and approximate line)
@@ -71,11 +72,11 @@ Schema:
   "issues": [
     {
       "type": "bug | security | performance | architecture",
-      "severity": "low | medium | high",
+      "severity": "low | medium | high | critical",
       "message": "What is wrong, referencing the actual code",
       "suggestion": "Concrete fix or alternative",
-      "reference": "The team rule or past decision this violates, or null",
-      "confidence": 85,
+      "reference": "Natural explanation of the team rule or past decision this violates, or null",
+      "confidence": "high | medium | low",
       "file": "path/to/file.py or null",
       "line": 42
     }
@@ -90,7 +91,7 @@ Your previous response was not valid JSON. Return ONLY the JSON object with no e
 Do not include markdown fences, explanation, or any prose.
 Schema:
 {
-  "issues": [{"type":"bug","severity":"high","message":"...","suggestion":"...","reference":null,"confidence":80,"file":null,"line":null}],
+  "issues": [{"type":"bug","severity":"high","message":"...","suggestion":"...","reference":null,"confidence":"high","file":null,"line":null}],
   "summary": "..."
 }"""
 
@@ -174,20 +175,25 @@ def _validate(data: dict) -> dict:
                 raise ValueError(f"Issue #{i} missing field '{field}'")
         if issue["type"] not in valid_types:
             issue["type"] = "bug"
-        if issue["severity"] not in ("low", "medium", "high"):
+        if issue["severity"] not in ("low", "medium", "high", "critical"):
             issue["severity"] = "low"
         issue.setdefault("reference", None)
-        try:
-            issue["confidence"] = max(0, min(100, int(issue.get("confidence", 75))))
-        except (TypeError, ValueError):
-            issue["confidence"] = 75
+        conf = issue.get("confidence", "medium")
+        if isinstance(conf, int):
+            if conf >= 90: conf = "high"
+            elif conf >= 70: conf = "medium"
+            else: conf = "low"
+        elif str(conf).lower() not in ("high", "medium", "low"):
+            conf = "medium"
+        issue["confidence"] = str(conf).lower()
 
-    # Enforce the 5-issue cap here as a safety net
-    data["issues"] = data["issues"][:5]
+    # The 5-issue cap is now handled by max_findings passed into the prompt,
+    # but we enforce a hard limit of 10 here as a safety net.
+    data["issues"] = data["issues"][:10]
     return data
 
 
-async def run_review(diff: str, beliefs_text: str, repo: str, pr_number: int) -> dict:
+async def run_review(diff: str, beliefs_text: str, repo: str, pr_number: int, max_findings: int = 5) -> dict:
     if not diff or len(diff.strip()) < 10:
         raise HTTPException(status_code=422, detail="Diff is empty or too short to review")
 
@@ -197,9 +203,10 @@ async def run_review(diff: str, beliefs_text: str, repo: str, pr_number: int) ->
 
     api_key = _get_api_key()
     prompt = _build_prompt(diff, beliefs_text, repo, pr_number)
+    system_prompt = SYSTEM_PROMPT.replace("{max_findings}", str(max_findings))
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
 
