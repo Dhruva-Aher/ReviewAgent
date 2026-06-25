@@ -180,9 +180,12 @@ def _validate(data: dict) -> dict:
         issue.setdefault("reference", None)
         conf = issue.get("confidence", "medium")
         if isinstance(conf, int):
-            if conf >= 90: conf = "high"
-            elif conf >= 70: conf = "medium"
-            else: conf = "low"
+            if conf >= 90:
+                conf = "high"
+            elif conf >= 70:
+                conf = "medium"
+            else:
+                conf = "low"
         elif str(conf).lower() not in ("high", "medium", "low"):
             conf = "medium"
         issue["confidence"] = str(conf).lower()

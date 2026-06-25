@@ -1,6 +1,5 @@
 import sqlite3
 import logging
-import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone

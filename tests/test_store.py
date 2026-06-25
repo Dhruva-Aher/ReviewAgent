@@ -1,6 +1,4 @@
-import os
-from datetime import datetime, timezone
-from store import load_review_history, append_review_history, _get_conn, init_db
+from store import load_review_history, append_review_history
 
 def test_load_empty(tmp_db):
     rh = load_review_history()

@@ -1,4 +1,3 @@
-import pytest
 import config
 
 def test_parse_valid_yaml():
