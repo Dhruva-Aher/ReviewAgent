@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 node_modules/
 ui/node_modules/
+beliefs.json
