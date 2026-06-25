@@ -14,6 +14,7 @@ import github
 import reviewer
 import formatter
 import orchestrator
+import config
 from rate_limiter import check_rate_limit
 from agents.base import AgentContext
 
@@ -24,23 +25,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("review_agent")
 
-_knowledge: list = []
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     belief_store.init_db()
-    global _knowledge
-    _knowledge = belief_store.load()
-    logger.info(
-        f"ReviewAgent started — loaded {len(_knowledge)} active knowledge item(s)"
-    )
+    logger.info("ReviewAgent started")
     yield
-
 
 app = FastAPI(
     title="ReviewAgent",
-    description="Autonomous PR review agent with persistent knowledge system",
+    description="Autonomous PR review agent with YAML configuration support",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -51,7 +44,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class ReviewRequest(BaseModel):
     repo: str
@@ -74,45 +66,6 @@ class ReviewRequest(BaseModel):
             raise ValueError("pr_number must be a positive integer")
         return v
 
-
-class AddKnowledgeRequest(BaseModel):
-    kind: str
-    text: str
-    repo: Optional[str] = None
-    category: str = "maintainability"
-    priority: str = "medium"
-    scope: str = "repository"
-
-    @field_validator("kind")
-    @classmethod
-    def validate_kind(cls, v: str) -> str:
-        if v not in ("rule", "architecture"):
-            raise ValueError("kind must be 'rule' or 'architecture'")
-        return v
-
-    @field_validator("text")
-    @classmethod
-    def validate_text(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("text must not be empty")
-        return v
-        
-    @field_validator("priority")
-    @classmethod
-    def validate_priority(cls, v: str) -> str:
-        if v not in ("critical", "high", "medium", "low"):
-            raise ValueError("priority must be critical, high, medium, or low")
-        return v
-        
-    @field_validator("scope")
-    @classmethod
-    def validate_scope(cls, v: str) -> str:
-        if v not in ("global", "repository", "directory", "file"):
-            raise ValueError("scope must be global, repository, directory, or file")
-        return v
-
-
 CONFIDENCE_THRESHOLD = int(os.getenv("CONFIDENCE_THRESHOLD", "60"))
 MULTI_AGENT = os.getenv("MULTI_AGENT", "true").lower() != "false"
 
@@ -123,8 +76,6 @@ async def _run_pipeline(
     post_comment_flag: bool,
     installation_id: int = None,
 ) -> dict:
-    global _knowledge
-
     owner, repo_name = repo.split("/")
     meta = {}
     req_txt = None
@@ -137,9 +88,11 @@ async def _run_pipeline(
         except HTTPException:
             meta = {}
 
+    head_ref = meta.get("head", "")
+
     # Try fetching requirements.txt
     try:
-        req_txt = github.fetch_file_content(owner, repo_name, "requirements.txt", meta.get("head", ""), installation_id)
+        req_txt = github.fetch_file_content(owner, repo_name, "requirements.txt", head_ref, installation_id)
     except Exception:
         req_txt = None
 
@@ -147,7 +100,11 @@ async def _run_pipeline(
     if not diff:
         raise HTTPException(status_code=422, detail="Diff is empty — nothing to review")
 
-    beliefs_text = belief_store.format_for_prompt(_knowledge, repo=repo)
+    # Fetch configuration YAML
+    yaml_str = github.fetch_repo_config(owner, repo_name, head_ref, installation_id)
+    repo_config = config.parse_yaml(yaml_str)
+    beliefs_text = config.format_for_prompt(repo_config, repo=repo)
+
     logger.info(f"[REVIEW] Starting — {repo} PR #{pr_number} ({len(diff)} chars)")
 
     # Parse changed files from diff
@@ -231,39 +188,65 @@ async def _run_pipeline(
         "beliefs_updated": bool(high_issues),
     }
 
-
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "knowledge_count": len(_knowledge),
         "mode": "github_app" if os.getenv("GITHUB_APP_ID") else "personal_token"
     }
 
-
 @app.get("/knowledge")
-def get_knowledge(repo: Optional[str] = None):
-    return belief_store.load(repo=repo)
+def get_knowledge(repo: str, ref: Optional[str] = "main"):
+    """
+    Read-only debug endpoint that returns the parsed YAML configuration
+    for the specified repository and reference.
+    """
+    try:
+        owner, repo_name = repo.split("/")
+        yaml_str = github.fetch_repo_config(owner, repo_name, ref)
+        repo_config = config.parse_yaml(yaml_str)
+        return repo_config.model_dump()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="repo must be owner/repo")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/knowledge")
-def add_knowledge(req: AddKnowledgeRequest):
-    global _knowledge
-    repo_msg = f" for repo {req.repo}" if req.repo else " globally"
-
-    belief_store.add_knowledge(
-        repo=req.repo,
-        kind=req.kind,
-        text=req.text,
-        category=req.category,
-        priority=req.priority,
-        scope=req.scope
-    )
-
-    _knowledge = belief_store.load()
-    logger.info(f"[KNOWLEDGE] Added {req.kind}{repo_msg}: {req.text[:60]}")
-    return {"status": "added", "knowledge": belief_store.load(req.repo)}
-
+@app.get("/export-knowledge")
+def export_knowledge(repo: Optional[str] = None):
+    try:
+        import yaml
+        with belief_store._get_conn() as conn:
+            query = "SELECT * FROM knowledge WHERE enabled = 1"
+            params = []
+            if repo:
+                query += " AND (repo IS NULL OR repo = ?)"
+                params.append(repo)
+            
+            cursor = conn.execute(query, tuple(params))
+            rules = []
+            architecture = []
+            for row in cursor:
+                d = dict(row)
+                if d["kind"] == "rule":
+                    rules.append({
+                        "text": d["text"],
+                        "category": d.get("category", "maintainability"),
+                        "priority": d.get("priority", "medium")
+                    })
+                elif d["kind"] == "architecture":
+                    architecture.append(d["text"])
+                    
+            config_dict = {"version": 1}
+            if rules:
+                config_dict["rules"] = rules
+            if architecture:
+                config_dict["architecture"] = architecture
+                
+            return {
+                "yaml": yaml.dump(config_dict, sort_keys=False)
+            }
+    except Exception as e:
+        return {"error": str(e), "message": "Legacy knowledge table may no longer exist."}
 
 @app.get("/review-history")
 def get_review_history(repo: Optional[str] = None):

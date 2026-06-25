@@ -238,3 +238,28 @@ def post_comment(owner: str, repo: str, pr_number: int, body: str, installation_
     url = resp.json().get("html_url", "")
     logger.info(f"Comment posted: {url}")
     return url
+
+def fetch_repo_config(owner: str, repo: str, ref: str, installation_id: int = None) -> str:
+    """
+    Attempts to fetch PRBeliefs configuration from common repository locations.
+    Returns the YAML string if found, or an empty string if none exist.
+    """
+    paths = [
+        ".github/prbeliefs.yml",
+        ".github/prbeliefs.yaml",
+        ".prbeliefs.yml",
+        ".prbeliefs.yaml"
+    ]
+    
+    for path in paths:
+        try:
+            content = fetch_file_content(owner, repo, path, ref, installation_id)
+            logger.info(f"[GITHUB] Found repository configuration at {path}")
+            return content
+        except HTTPException as e:
+            if e.status_code == 404:
+                continue
+            logger.warning(f"Failed to fetch config at {path}: {e.detail}")
+            
+    logger.info(f"[GITHUB] No repository configuration found for {owner}/{repo}")
+    return ""
