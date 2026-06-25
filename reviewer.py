@@ -12,42 +12,76 @@ MAX_DIFF = 80_000
 
 FALLBACK_REVIEW = {
     "issues": [],
-    "summary": "Unable to generate structured review safely. Please retry."
+    "summary": "Unable to generate structured review safely. Please retry.",
 }
 
 SYSTEM_PROMPT = """\
-You are a senior software engineer performing a code review.
+You are a senior software engineer reviewing a teammate's pull request.
 
-You will be given a git diff and a belief system of team rules and past decisions.
+Your job is to find problems that would matter in production — not to nitpick style.
 
-Return ONLY valid JSON. No markdown. No prose before or after. No code fences.
+REVIEW PRIORITIES (in order):
+1. Correctness bugs — logic errors, off-by-one errors, wrong conditions
+2. Security — injections, hardcoded secrets, authentication gaps, input not validated
+3. Performance — O(n²) loops, N+1 queries, loading everything into memory unnecessarily
+4. Edge cases — empty inputs, None values, concurrent access, integer overflow
+5. API misuse — wrong method called, required field missing, incorrect error handling
+6. Backwards compatibility — breaking changes to public interfaces or data schemas
+7. Missing validation — user inputs reaching databases or external calls without checks
+8. Belief violations — code that contradicts the team's stated rules or past decisions
+
+DO NOT comment on:
+- Formatting, indentation, whitespace
+- Missing docstrings or comments
+- Import ordering
+- Variable naming preferences
+- Style choices that are already consistent with the rest of the codebase
+- Issues that are purely cosmetic
+
+CONFIDENCE CALIBRATION:
+- 90–100: You are certain this is a bug or security issue
+- 70–89: You are fairly sure this will cause problems in real use
+- 50–69: This could become a problem under specific conditions — state them
+- Below 50: Do not include this issue
+
+ISSUE LIMIT:
+Return at most 5 issues. If you find more, keep the highest severity ones.
+If there are no issues worth flagging, return an empty issues list and write
+a short summary explaining what looks good about the PR.
+
+EVERY issue must:
+- Reference the actual code from the diff (file name and approximate line)
+- Explain what is wrong
+- Explain why it matters (what could actually go wrong)
+- Suggest a concrete fix
+
+Return ONLY valid JSON. No markdown fences. No prose before or after.
 
 Schema:
 {
   "issues": [
     {
-      "type": "bug | style | architecture",
+      "type": "bug | security | performance | architecture",
       "severity": "low | medium | high",
-      "message": "Specific description referencing actual code in the diff",
-      "suggestion": "Exact fix or alternative",
-      "reference": "Cited rule or past decision, or null",
+      "message": "What is wrong, referencing the actual code",
+      "suggestion": "Concrete fix or alternative",
+      "reference": "The team rule or past decision this violates, or null",
       "confidence": 85,
-      "file": "path/to/file or null",
+      "file": "path/to/file.py or null",
       "line": 42
     }
   ],
-  "summary": "2-3 sentence overall assessment. Be direct. No filler."
+  "summary": "2-4 sentences. What looks good, what needs attention, overall recommendation."
 }
 
-confidence is an integer 0-100. file should be the file path if parseable. line should be line number or null.
-STRICT: Every issue must reference actual code from the diff. No hallucinations."""
+STRICT: Every issue must reference actual code from the diff. Do not invent issues."""
 
 CORRECTION_PROMPT = """\
 Your previous response was not valid JSON. Return ONLY the JSON object with no extra text.
 Do not include markdown fences, explanation, or any prose.
-The schema is:
+Schema:
 {
-  "issues": [{"type":"...","severity":"...","message":"...","suggestion":"...","reference":null,"confidence":80,"file":null,"line":null}],
+  "issues": [{"type":"bug","severity":"high","message":"...","suggestion":"...","reference":null,"confidence":80,"file":null,"line":null}],
   "summary": "..."
 }"""
 
@@ -63,7 +97,7 @@ def _build_prompt(diff: str, beliefs_text: str, repo: str, pr_number: int) -> st
     return f"""REPO: {repo}
 PR: #{pr_number}
 
---- BELIEF SYSTEM ---
+--- TEAM RULES AND PAST DECISIONS ---
 {beliefs_text}
 
 --- DIFF ---
@@ -123,12 +157,13 @@ def _validate(data: dict) -> dict:
     if not isinstance(data["issues"], list):
         raise ValueError("'issues' must be a list")
 
+    valid_types = ("bug", "security", "performance", "architecture", "style")
     for i, issue in enumerate(data["issues"]):
         for field in ("type", "severity", "message", "suggestion"):
             if field not in issue:
                 raise ValueError(f"Issue #{i} missing field '{field}'")
-        if issue["type"] not in ("bug", "style", "architecture"):
-            issue["type"] = "style"
+        if issue["type"] not in valid_types:
+            issue["type"] = "bug"
         if issue["severity"] not in ("low", "medium", "high"):
             issue["severity"] = "low"
         issue.setdefault("reference", None)
@@ -137,6 +172,8 @@ def _validate(data: dict) -> dict:
         except (TypeError, ValueError):
             issue["confidence"] = 75
 
+    # Enforce the 5-issue cap here as a safety net
+    data["issues"] = data["issues"][:5]
     return data
 
 

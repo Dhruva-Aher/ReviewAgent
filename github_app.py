@@ -50,10 +50,4 @@ def get_installation_token(installation_id: int) -> str:
         raise RuntimeError(f"Could not get installation token: {e}")
 
 
-def get_app_headers(installation_id: int) -> dict:
-    token = get_installation_token(installation_id)
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+

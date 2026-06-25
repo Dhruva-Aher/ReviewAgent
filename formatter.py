@@ -6,30 +6,40 @@ SEVERITY_ICON = {
 
 TYPE_LABEL = {
     "bug":          "Bug",
+    "security":     "Security",
+    "performance":  "Performance",
     "architecture": "Architecture",
     "style":        "Style",
 }
 
 
 def to_github_comment(review: dict, repo: str, pr_number: int) -> str:
+    issues = review.get("issues", [])
+    summary = review.get("summary", "No summary provided.")
+
     lines = [
-        f"## 🤖 ReviewAgent — `{repo}` PR #{pr_number}",
-        "",
-        "### Summary",
-        review.get("summary", "No summary provided."),
+        f"## 🧠 PRBeliefs — `{repo}` PR #{pr_number}",
         "",
     ]
 
-    issues = review.get("issues", [])
-
     if not issues:
-        lines += ["### Issues", "_No issues found._", ""]
+        lines += [
+            "### ✅ Approved",
+            "",
+            summary,
+        ]
     else:
+        lines += [
+            "### Summary",
+            summary,
+            "",
+            "### Issues",
+            "",
+        ]
+
         high   = [i for i in issues if i.get("severity") == "high"]
         medium = [i for i in issues if i.get("severity") == "medium"]
         low    = [i for i in issues if i.get("severity") == "low"]
-
-        lines += ["### Issues", ""]
 
         for group, label in ((high, "High"), (medium, "Medium"), (low, "Low")):
             if not group:
@@ -37,22 +47,25 @@ def to_github_comment(review: dict, repo: str, pr_number: int) -> str:
             icon = SEVERITY_ICON[label.lower()]
             lines.append(f"#### {icon} {label} Severity")
             for issue in group:
-                type_label = TYPE_LABEL.get(issue.get("type", "style"), "Style")
+                type_label = TYPE_LABEL.get(issue.get("type", "bug"), "Bug")
                 confidence = issue.get("confidence")
-                conf_str = f" _(confidence: {confidence}%)_" if confidence is not None else ""
-                lines.append(f"- **[{type_label}]** {issue.get('message', '')}{conf_str}")
+                loc = ""
+                if issue.get("file"):
+                    loc = f" in `{issue['file']}`"
+                    if issue.get("line"):
+                        loc += f" (line {issue['line']})"
+                conf_str = f" — _{confidence}% confidence_" if confidence is not None else ""
+                lines.append(f"- **[{type_label}]** {issue.get('message', '')}{loc}{conf_str}")
                 if issue.get("suggestion"):
-                    lines.append(f"  - 💡 {issue['suggestion']}")
+                    lines.append(f"  - 💡 **Fix:** {issue['suggestion']}")
                 if issue.get("reference"):
-                    lines.append(f"  - 📌 _{issue['reference']}_")
+                    lines.append(f"  - 📌 _Violates team rule: {issue['reference']}_")
             lines.append("")
 
-    total = len(issues)
-    high_count = sum(1 for i in issues if i.get("severity") == "high")
-    lines += [
-        "---",
-        f"_ReviewAgent found **{total}** issue(s) — **{high_count}** high severity. "
-        "Powered by persistent belief system._",
-    ]
+        high_count = len(high)
+        lines += [
+            "---",
+            f"_Found **{len(issues)}** issue(s) — **{high_count}** high severity._",
+        ]
 
     return "\n".join(lines)

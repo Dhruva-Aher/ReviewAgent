@@ -137,7 +137,7 @@ async def _run_pipeline(
 
     # Parse changed files from diff
     changed_files = []
-    for line in diff.split("\\n"):
+    for line in diff.split("\n"):
         if line.startswith("+++ b/"):
             changed_files.append(line[6:].strip())
 
@@ -171,6 +171,7 @@ async def _run_pipeline(
 
     issue_count = len(filtered_issues)
     high_count = sum(1 for i in filtered_issues if i.get("severity") == "high")
+    belief_store.log_review(repo, pr_number, issue_count, high_count)
     logger.info(f"[REVIEW] Complete — {repo} PR #{pr_number} — {issue_count} issue(s), {high_count} high severity")
 
     comment_body = formatter.to_github_comment(review_result, repo, pr_number)
@@ -237,21 +238,25 @@ def get_beliefs(repo: Optional[str] = None):
 @app.post("/beliefs")
 def add_belief(req: AddBeliefRequest):
     global _beliefs
-    current = belief_store.load()
-
-    if req.repo:
-        target = current.setdefault("repos", {}).setdefault(req.repo, {"rules": [], "past_decisions": []})
-    else:
-        target = current
-
-    if req.value in target[req.type]:
-        return {"status": "already_exists", "beliefs": target}
-    target[req.type].append(req.value)
-    belief_store.save(current)
-    _beliefs = current
     repo_msg = f" for repo {req.repo}" if req.repo else " globally"
+
+    if req.type == "rules":
+        added = belief_store._add_rule(req.value, repo=req.repo)
+    else:
+        # Check if decision already exists before appending
+        current = belief_store.load(req.repo)
+        existing = [item["value"] if isinstance(item, dict) else item for item in current["past_decisions"]]
+        if req.value in existing:
+            return {"status": "already_exists"}
+        belief_store.append_decision(req.value, repo=req.repo)
+        added = True
+
+    if not added:
+        return {"status": "already_exists"}
+
+    _beliefs = belief_store.load()
     logger.info(f"[BELIEFS] Added to '{req.type}'{repo_msg}: {req.value[:60]}")
-    return {"status": "added", "beliefs": target}
+    return {"status": "added", "beliefs": belief_store.load(req.repo)}
 
 
 @app.post("/review")

@@ -27,7 +27,12 @@ def test_get_beliefs():
 def test_post_beliefs():
     response = client.post("/beliefs", json={"type": "rules", "value": "New global rule"})
     assert response.status_code == 200
-    assert "New global rule" in response.json()["beliefs"]["rules"]
+    assert response.json()["status"] == "added"
+    rules = response.json()["beliefs"]["rules"]
+    assert any(
+        (r["value"] if isinstance(r, dict) else r) == "New global rule"
+        for r in rules
+    )
 
 def test_post_review():
     with patch("main._run_pipeline", new_callable=AsyncMock) as mock_pipeline:
