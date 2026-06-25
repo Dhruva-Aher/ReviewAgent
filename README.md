@@ -179,6 +179,22 @@ Open to ideas, feedback, and contributions — especially around:
 - Review accuracy  
 - Scaling architecture  
 
+1. Fork the repository and create your feature branch.
+2. Add your new agent class to the `agents/` directory, inheriting from the base `Agent` class.
+3. Implement the `relevance_hint` method to define when your agent should run based on the diff.
+4. Implement the `run` method to analyze the code and return an `AgentResult`.
+5. Add your new agent to the supervisor registry in `orchestrator.py` and write unit tests in `tests/test_agents.py`. Submit a PR!
+
+Please see our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) for more information.
+
+---
+
+## 🛡️ Support & Security
+
+* **Support & Help:** See [SUPPORT.md](SUPPORT.md) for help, bug reports, and feature requests.
+* **Privacy Policy:** See [PRIVACY.md](PRIVACY.md) to understand how we handle your data.
+* **Security:** See [SECURITY.md](SECURITY.md) for vulnerability reporting instructions.
+
 ---
 
 ## 📄 License
