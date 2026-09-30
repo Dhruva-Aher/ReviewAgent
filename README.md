@@ -64,5 +64,7 @@ Configure a GitHub App pointing webhooks at your tunnel/API (`main.py` / `github
 | Beliefs store | `store.py`, `prbeliefs.schema.json` |
 | GitHub integration | `github.py`, `github_app.py` |
 | Tests | `tests/` |
+| Claim sheet | [docs/METRICS.md](docs/METRICS.md) |
+| Decisions | [docs/DECISIONS.md](docs/DECISIONS.md) |
 
 **Honesty:** Marketplace listing / production traffic are not resume metrics unless you have live install counts — pitch the **architecture** (queue + beliefs + fail-soft review) and the **30**-test suite.
